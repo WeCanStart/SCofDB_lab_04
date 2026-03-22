@@ -11,7 +11,7 @@ import uuid
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import text
 
-from app.infrastructure.db import get_db
+from app.infrastructure import db as db_module
 
 
 @pytest.fixture(scope="session")

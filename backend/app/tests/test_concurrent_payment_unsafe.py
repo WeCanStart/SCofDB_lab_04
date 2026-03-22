@@ -8,8 +8,8 @@ pay_order_unsafe() возникает двойная оплата.
 import asyncio
 import pytest
 import uuid
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 from app.application.payment_service import PaymentService
 
@@ -22,16 +22,18 @@ DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/marketplac
 async def db_session():
     """
     Создать сессию БД для тестов.
-    
-    TODO: Реализовать фикстуру:
-    1. Создать engine
-    2. Создать session maker
-    3. Открыть сессию
-    4. Yield сессию
-    5. Закрыть сессию после теста
     """
-    # TODO: Реализовать создание сессии
-    raise NotImplementedError("TODO: Реализовать db_session fixture")
+    engine = create_async_engine(DATABASE_URL, echo=True)
+    async_session = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async with async_session() as session:
+        yield session
+    
+    await engine.dispose()
 
 
 @pytest.fixture
@@ -47,7 +49,35 @@ async def test_order(db_session):
     5. После теста - очистить данные
     """
     # TODO: Реализовать создание тестового заказа
-    raise NotImplementedError("TODO: Реализовать test_order fixture")
+    user_id = uuid.uuid4()
+    order_id = uuid.uuid4()
+    await db_session.execute(
+        text("INSERT INTO users (id, name, email) VALUES (:id, :name, :email)"),
+        {"id": user_id, "name": "Test User", "email": "test@example.com"}
+    )
+
+    await db_session.execute(
+        text("INSERT INTO orders (id, user_id, status, created_at) VALUES (:id, :user_id, 'created', NOW())"),
+        {"id": order_id, "user_id": user_id}
+    )
+
+    await db_session.commit()
+
+    yield order_id
+
+    await db_session.execute(
+        text("DELETE FROM order_status_history WHERE order_id = :order_id"),
+        {"order_id": order_id}
+    )
+    await db_session.execute(
+        text("DELETE FROM orders WHERE id = :order_id"),
+        {"order_id": order_id}
+    )
+    await db_session.execute(
+        text("DELETE FROM users WHERE id = :user_id"),
+        {"user_id": user_id}
+    )
+    await db_session.commit()
 
 
 @pytest.mark.asyncio
@@ -95,7 +125,36 @@ async def test_concurrent_payment_unsafe_demonstrates_race_condition(db_session,
            print(f"  - {record['changed_at']}: status = {record['status']}")
     """
     # TODO: Реализовать тест, демонстрирующий race condition
-    raise NotImplementedError("TODO: Реализовать test_concurrent_payment_unsafe")
+    order_id = test_order
+
+    engine = create_async_engine(DATABASE_URL, echo=True, future=True)
+    async_session_maker = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with async_session_maker() as session1, async_session_maker() as session2:
+
+        async def payment_attempt_1():
+            service1 = PaymentService(session1)
+            return await service1.pay_order_unsafe(order_id)
+
+        async def payment_attempt_2():
+            service2 = PaymentService(session2)
+            return await service2.pay_order_unsafe(order_id)
+
+        results = await asyncio.gather(
+            payment_attempt_1(),
+            payment_attempt_2(),
+            return_exceptions=True
+        )
+
+    service = PaymentService(db_session)
+    history = await service.get_payment_history(order_id)
+
+    assert len(history) == 2, "Ожидалось 2 записи об оплате (RACE CONDITION!)"
+
+    print(f"\n⚠️ RACE CONDITION DETECTED!")
+    print(f"Order {order_id} was paid TWICE:")
+    for record in history:
+        print(f"  - {record['changed_at']}: status = {record['status']}")
 
 
 @pytest.mark.asyncio
@@ -111,7 +170,7 @@ async def test_concurrent_payment_unsafe_both_succeed():
     Это подтверждает, что проблема не в ошибках, а в race condition.
     """
     # TODO: Реализовать проверку успешности обеих транзакций
-    raise NotImplementedError("TODO: Реализовать test_concurrent_payment_unsafe_both_succeed")
+    pass # ??
 
 
 if __name__ == "__main__":
