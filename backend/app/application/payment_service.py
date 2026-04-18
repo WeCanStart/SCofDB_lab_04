@@ -75,16 +75,15 @@ class PaymentService:
             # ВАЖНО: Нет проверки rowcount, чтобы разрешить гонку данных
             await self.session.execute(
                 text("UPDATE orders SET status = 'paid' WHERE id = :order_id AND status = 'created'"),
-                {"order_id": order_id}
+                {"order_id": str(order_id)}
             )
             
-            import uuid as uuid_lib
             await self.session.execute(
                 text(
                     "INSERT INTO order_status_history (id, order_id, status, changed_at) "
-                    "VALUES (:id, :order_id, 'paid', datetime('now'))"
+                    "VALUES (gen_random_uuid(), :order_id, 'paid', NOW())"
                 ),
-                {"id": uuid_lib.uuid4(), "order_id": order_id}
+                {"order_id": str(order_id)}
             )
         
         final = await self.session.execute(
@@ -161,21 +160,20 @@ class PaymentService:
 
             upd = await self.session.execute(
                 text("UPDATE orders SET status = 'paid' WHERE id = :order_id AND status = 'created'"),
-                {"order_id": order_id}
+                {"order_id": str(order_id)}
             )
             if getattr(upd, "rowcount", 0) == 0:
                 raise OrderAlreadyPaidError(order_id)
             
-            import uuid as uuid_lib
             await self.session.execute(
                 text(
                     "INSERT INTO order_status_history (id, order_id, status, changed_at) "
-                    "VALUES (:id, :order_id, 'paid', datetime('now'))"
+                    "VALUES (gen_random_uuid(), :order_id, 'paid', NOW())"
                 ),
-                {"id": uuid_lib.uuid4(), "order_id": order_id}
+                {"order_id": str(order_id)}
             )
             await self.session.commit()
-
+        
             final = await self.session.execute(
                 text("SELECT id, user_id, status, total_amount, created_at FROM orders WHERE id = :order_id"),
                 {"order_id": order_id}
@@ -219,6 +217,6 @@ class PaymentService:
                 "WHERE order_id = :order_id AND status = 'paid' "
                 "ORDER BY changed_at"
             ),
-            {"order_id": order_id}
+            {"order_id": str(order_id)}
         )
         return [dict(row._mapping) for row in res.fetchall()]
